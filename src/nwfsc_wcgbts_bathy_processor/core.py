@@ -482,3 +482,55 @@ def process_bathy(raw_path: str, nmea_log_path: str = None, sonar_model: str = "
         crs="EPSG:4326",
     )
     return gdf
+
+
+def generate_echogram(raw_path: str, sonar_model: str = "EK80") -> xr.Dataset:
+    """
+    Generate Volume Backscattering Strength (Sv) dataset from a Simrad .raw file
+    using echopype, with robust handling for NumPy 2.x compatibility issues.
+
+    Parameters
+    ----------
+    raw_path : str
+        Path to the Simrad .raw file.
+    sonar_model : str
+        Simrad model ("EK60" or "EK80"). Default is "EK80".
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset containing calculated Volume Backscattering Strength (Sv) data.
+    """
+    if not os.path.exists(raw_path):
+        raise FileNotFoundError(f"Raw data file not found: {raw_path}")
+
+    # 1. Parse Simrad file
+    ed = ep.open_raw(raw_path, sonar_model=sonar_model)
+
+    # 2. Self-healing workaround for NumPy 2.x compatibility with echopype 0.11.x
+    # When filter_time in Vendor_specific is empty, it defaults to float64, while
+    # ping_time has datetime64[ns] dtype. NumPy 2.0+ strictly forbids the intersection of
+    # datetime64 and float64 dtypes, raising DTypePromotionError.
+    # To bypass this, we drop variables that depend on filter_time and assign a single
+    # dummy datetime64 value to filter_time coordinate.
+    if "Vendor_specific" in ed._tree:
+        vs_node = ed._tree["Vendor_specific"]
+        if vs_node.ds is not None and "filter_time" in vs_node.ds.coords:
+            if len(vs_node.ds["filter_time"]) == 0:
+                vs = vs_node.ds
+                vars_to_drop = [v for v in vs.data_vars if "filter_time" in vs[v].dims]
+                vs_dropped = vs.drop_vars(vars_to_drop)
+                # Assign a dummy filter_time of datetime64[ns] so that length is exactly 1
+                dummy_time = np.array([pd.Timestamp("2018-06-01").to_datetime64()])
+                vs_new = vs_dropped.assign_coords(filter_time=dummy_time)
+                vs_node.ds = vs_new
+
+    # 3. Compute Sv
+    if sonar_model == "EK80":
+        # Simrad EK80 requires explicit waveform and encode modes
+        ds_Sv = ep.calibrate.compute_Sv(ed, waveform_mode="CW", encode_mode="power")
+    else:
+        # EK60 has default modes
+        ds_Sv = ep.calibrate.compute_Sv(ed)
+
+    return ds_Sv

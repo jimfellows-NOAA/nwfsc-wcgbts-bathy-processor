@@ -36,17 +36,45 @@ This pipeline supports dual-path depth retrieval:
 
 ## 3. Installation & Setup
 
-We manage this project's environment using **uv**, which automatically handles dependencies and local Python virtual environments.
+We manage this project's environment and dependencies using **uv**, an extremely fast Python package and environment manager written in Rust.
 
-To initialize, ensure you have the `uv` tool installed, then run:
+### Step 1: Install `uv`
+If you do not have `uv` installed, install it using the command for your operating system:
+
+* **macOS and Linux**:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+* **Windows (PowerShell)**:
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+* **Via Pip** (if you already have Python/pip installed):
+  ```bash
+  pip install uv
+  ```
+
+### Step 2: Clone the Repository
 ```bash
-# Clone the repository
 git clone https://github.com/nwfsc-wcgbts-bathy-processor.git
 cd nwfsc-wcgbts-bathy-processor
+```
 
-# Synchronize the dependencies and build the virtual environment
+### Step 3: Synchronize Dependencies & Create Virtual Environment
+The `uv sync` command automatically installs the correct Python version (as specified in `requires-python` in `pyproject.toml`), creates a localized virtual environment (`.venv`), and installs all project dependencies and development packages.
+```bash
 uv sync
 ```
+
+### Step 4: Verify the Installation
+Verify that the virtual environment is working and the command-line application is correctly registered:
+```bash
+# Verify the CLI tool works and outputs help
+uv run bathy-processor --help
+```
+You should see the help documentation with commands `process`, `visualize`, and `echogram`.
+
+---
 
 ---
 
@@ -111,6 +139,58 @@ uv run bathy-processor visualize <processed_dataset_path> [options]
 ```bash
 # Generate visualizations from a processed Parquet file
 uv run bathy-processor visualize data/processed/EXCal_-D20180601-T183627.parquet --map-output data/processed/map.html --plot-output data/processed/profile.png
+```
+
+---
+
+### Command 3: `echogram`
+Processes a Simrad `.raw` file to compute Volume Backscattering Strength ($S_v$), which is the standard acoustic metric for visualizing water-column fish biomass. Supports both high-dimensional quantitative formats and rapid visual inspection image plotting.
+
+#### Syntax:
+```bash
+uv run bathy-processor echogram <input_raw_path> --output <output_path> [options]
+```
+
+#### Parameter & Option Reference:
+* `<input_raw_path>`: (Required, positional) Path to the raw echosounder `.raw` file.
+* `--output <output_path>`: (Required, option) Path to save the processed output. Output type is automatically routed based on the file extension (`.zarr`, `.nc`, `.png`, `.jpg`, `.jpeg`).
+* `--sonar-model {EK60,EK80}`: (Optional) Specify the echosounder architecture. Default is `EK80`.
+  - **`EK80`**: Handles both complex broadband data and power narrowband data by automatically executing CW/power mode calibration.
+  - **`EK60`**: Calibrates narrowband telemetry using default EK60 constants.
+
+#### Step-by-Step Usage & Examples:
+
+##### Example 1: Quantitative Cloud-Native Export (`.zarr`)
+Zarr is the modern industry standard for cloud-optimized, high-performance, multi-dimensional array storage. This command outputs the entire dataset containing coordinates (`channel`, `ping_time`, `range_sample`) and data variables (`Sv`, `echo_range`, calibration variables) to a local Zarr directory structure.
+```bash
+uv run bathy-processor echogram data/raw/1june2018-20260828T212005Z-1-001/1june2018/EXCal_-D20180601-T183627.raw --output data/processed/echogram.zarr --sonar-model EK80
+```
+
+##### Example 2: Tabular/Scientific Legacy Format (`.nc` / `.netcdf`)
+Exports the calibrated Volume Backscattering Strength ($S_v$) to a classic binary NetCDF file. Perfect for integration with older software, MATLAB scripts, or archival NOAA databases.
+```bash
+uv run bathy-processor echogram data/raw/1june2018-20260828T212005Z-1-001/1june2018/EXCal_-D20180601-T183627.raw --output data/processed/echogram.nc --sonar-model EK80
+```
+
+##### Example 3: Rapid Visual Inspection PNG Image (`.png`)
+Extracts the calibrated $S_v$ matrix for the first transducer frequency channel, maps the pings horizontally, and plots depth bins vertically.
+* **Colormap**: Decorated with the high-signal `'viridis'` colormap to clearly highlight pelagic fish schools and the hard seafloor line.
+* **Acoustic Bounds**: Scaled between $-80\text{ dB}$ (weak scattering, like small plankton/krill) and $-30\text{ dB}$ (strong scattering, like rocky seafloor or dense pelagic fish swim bladders).
+* **Orientation**: Inverts the Y-axis (Range Sample index) so $0$ (sea surface) is at the top of the canvas, mirroring standard hydrographic echogram orientation.
+```bash
+uv run bathy-processor echogram data/raw/1june2018-20260828T212005Z-1-001/1june2018/EXCal_-D20180601-T183627.raw --output data/processed/fish_profile.png --sonar-model EK80
+```
+
+##### Example 4: Rapid Visual Inspection JPEG Image (`.jpg` / `.jpeg`)
+Generates the exact same professional water-column profile plot and saves it as a lightweight compressed JPEG.
+```bash
+uv run bathy-processor echogram data/raw/1june2018-20260828T212005Z-1-001/1june2018/EXCal_-D20180601-T183627.raw --output data/processed/fish_profile.jpg --sonar-model EK80
+```
+
+##### Example 5: Processing older Simrad EK60 raw files
+To process files generated by older Simrad EK60 echosounders, explicitly set the `--sonar-model` parameter to `EK60`:
+```bash
+uv run bathy-processor echogram data/raw/calibration-20260828T212013Z-1-001/calibration/EXCal_-D20180518-T154136.raw --output data/processed/ek60_fish_profile.png --sonar-model EK60
 ```
 
 ---

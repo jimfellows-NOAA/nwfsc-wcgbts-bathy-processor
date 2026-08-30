@@ -15,6 +15,7 @@ from nwfsc_wcgbts_bathy_processor.core import (
     process_bathy,
     export_to_cog,
     export_to_hdf5,
+    generate_echogram,
 )
 
 
@@ -193,6 +194,12 @@ def main():
     parser_vis.add_argument("--map-output", default="vessel_path.html", help="Path to output interactive map HTML")
     parser_vis.add_argument("--plot-output", default="depth_profile.png", help="Path to output depth profile cross-section PNG")
 
+    # Command: echogram
+    parser_echo = subparsers.add_parser("echogram", help="Generate Volume Backscattering Strength (Sv) water-column profile")
+    parser_echo.add_argument("input_raw", help="Path to input Simrad .raw file")
+    parser_echo.add_argument("--output", required=True, help="Path to save processed echogram (.zarr, .nc, .png, .jpg, .jpeg)")
+    parser_echo.add_argument("--sonar-model", default="EK80", choices=["EK60", "EK80"], help="Simrad sonar model")
+
     args = parser.parse_args()
 
     try:
@@ -235,6 +242,44 @@ def main():
             create_depth_cross_section(gdf, args.plot_output)
 
             print("Visualization task completed successfully.")
+
+        elif args.command == "echogram":
+            print(f"Generating echogram for Simrad raw file: {args.input_raw}")
+            print(f"Sonar model specified: {args.sonar_model}")
+
+            ds_Sv = generate_echogram(args.input_raw, sonar_model=args.sonar_model)
+            print("Volume Backscattering Strength (Sv) calculated successfully.")
+
+            ext = os.path.splitext(args.output)[1].lower()
+            if ext == ".zarr":
+                print(f"Exporting quantitative multi-dimensional dataset to Zarr: {args.output}")
+                ds_Sv.to_zarr(args.output, mode="w")
+            elif ext in [".nc", ".netcdf"]:
+                print(f"Exporting legacy dataset to NetCDF: {args.output}")
+                ds_Sv.to_netcdf(args.output)
+            elif ext in [".png", ".jpg", ".jpeg"]:
+                print(f"Generating 2D echogram visualization: {args.output}")
+                if "Sv" not in ds_Sv.data_vars:
+                    raise KeyError("Dataset does not contain 'Sv' variable.")
+
+                sv_data = ds_Sv["Sv"].isel(channel=0)
+                plt.figure(figsize=(11, 6))
+
+                # Plot with ping_time on X, range_sample on Y, inverting Y-axis
+                sv_data.plot(x="ping_time", y="range_sample", cmap="viridis", vmin=-80, vmax=-30)
+                plt.gca().invert_yaxis()
+                plt.title(f"Volume Backscattering Strength (Sv) - Channel 0", fontsize=12, fontweight="bold")
+                plt.xlabel("Ping Time", fontsize=10)
+                plt.ylabel("Range Sample Index", fontsize=10)
+                plt.tight_layout()
+                plt.savefig(args.output, dpi=150)
+                plt.close()
+            else:
+                raise ValueError(
+                    f"Unsupported output file format '{ext}' for echogram. "
+                    "Supported formats: .zarr, .nc, .png, .jpg, .jpeg"
+                )
+            print("Echogram task completed successfully.")
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

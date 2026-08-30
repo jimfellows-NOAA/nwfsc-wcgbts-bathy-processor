@@ -21,6 +21,7 @@ from nwfsc_wcgbts_bathy_processor.core import (
     process_bathy,
     export_to_cog,
     export_to_hdf5,
+    generate_echogram,
 )
 from nwfsc_wcgbts_bathy_processor.cli import load_processed_dataset
 
@@ -240,3 +241,39 @@ def test_nmea_injection_logic(tmp_path):
     assert not gdf_override.empty
     assert gdf_override["latitude"].between(45.49, 45.52).all()
     assert gdf_override["longitude"].between(-125.52, -125.49).all()
+
+
+def test_echogram_generation(tmp_path):
+    """
+    Test Volume Backscattering Strength (Sv) echogram generation.
+    Saves a Zarr dataset and a PNG image, and validates that they are
+    correctly created on disk and contain the Sv variable.
+    """
+    sample_file = find_sample_raw_file()
+    if not sample_file:
+        pytest.skip("No sample Simrad .raw file found in data/raw/. Skipping echogram test.")
+
+    # 1. Generate Sv dataset
+    ds_Sv = generate_echogram(sample_file, sonar_model="EK80")
+
+    assert "Sv" in ds_Sv.data_vars
+    assert ds_Sv["Sv"].ndim == 3  # (channel, ping_time, range_sample)
+
+    # 2. Export to Zarr
+    zarr_path = tmp_path / "echogram.zarr"
+    ds_Sv.to_zarr(str(zarr_path), mode="w")
+    assert zarr_path.exists()
+
+    # 3. Export to PNG image (first channel)
+    png_path = tmp_path / "echogram.png"
+    sv_data = ds_Sv["Sv"].isel(channel=0)
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    sv_data.plot(x="ping_time", y="range_sample", cmap="viridis", vmin=-80, vmax=-30)
+    plt.gca().invert_yaxis()
+    plt.title("Volume Backscattering Strength (Sv) - Test")
+    plt.savefig(str(png_path))
+    plt.close()
+
+    assert png_path.exists()

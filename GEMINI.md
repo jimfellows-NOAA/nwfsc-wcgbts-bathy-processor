@@ -64,6 +64,12 @@ Standard GeoDataFrames are vector tables (point geometries). To produce a raster
 3. **Bin Averaging**: Acoustic depth values falling inside each grid cell are averaged. Empty cells are filled with a standard NoData value (`-9999.0`).
 4. **Pyramidal Tiling**: The grid is written with a tiled layout ($256 \times 256$ blocks), compressed via `DEFLATE` compression, and decorated with dynamic power-of-two downsampled resolution overviews (`[2, 4, 8, 16]`). This structures a fully-compliant Cloud Optimized GeoTIFF.
 
+### D. Volume Backscattering Strength (Sv) & Water Column Profiles
+To process water column fish biomass:
+1. **Calibration Workflow**: The pipeline computes the Volume Backscattering Strength ($S_v$) in dB using `echopype.calibrate.compute_Sv()`. This translates raw, uncalibrated acoustic backscatter samples (`backscatter_r`) into physically-meaningful volumetric backscattering data.
+2. **Self-Healing NumPy 2.x Workaround**: In Simrad EK80 raw files that record power-only (CW) data, the `Vendor_specific` metadata group lacks complex filter coefficients, leaving the `filter_time` coordinate empty (size 0). Under NumPy 2.0+, strict coordinate promotion rules raise a `DTypePromotionError` when attempting to intersect empty `float64` coordinates with `datetime64[ns]` ping times. The pipeline programmatically self-heals this by dropping the empty filter coefficient variables and assigning a dummy, single-element `datetime64[ns]` timestamp to the `filter_time` coordinate, allowing calibration to safely execute.
+3. **CLI Extension Routing**: Multi-dimensional datasets are stored in Zarr format (`.zarr`) for high-performance cloud-native analytics or classic NetCDF (`.nc`) for legacy software. Rapid visual inspection generates an inverted-Y 2D plot with an adaptive colormap scale (`vmin=-80`, `vmax=-30` dB) to clearly separate fish schools from the seabed.
+
 ---
 
 ## 3. Environment & Self-Healing Path Configurations
@@ -80,3 +86,4 @@ Our `pytest` suite in `tests/test_pipeline.py` maintains high-signal, zero-side-
 * **Locality Agnostic**: Searches recursively for any raw `.raw` files under `data/raw/` relative to both the execution path and the test folder, automatically skipping integration tests if local raw files are missing (avoiding CI/CD runner failures).
 * **Mock Injections**: Tests the optional navigation injection overrides by generating a temporary `.nmea` file string containing coordinates shifted to a completely different bounding box (lat $45.5$, lon $-125.5$), processing the raw file, and asserting that the resulting GeoDataFrame contains only the overridden geographic coordinates.
 * **COG Pyramidal Verification**: Tests that the exported Cloud Optimized GeoTIFF is raster-compliant and contains the generated downsampled overview pyramids.
+* **Echogram & Zarr Verification**: Evaluates Volume Backscattering Strength ($S_v$) calculation on a local raw file, asserting that the result is a 3-dimensional dataset containing the `Sv` variable, and verifies exporting to a multi-dimensional Zarr store as well as rendering a 2D profile image (.png).
